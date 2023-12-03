@@ -51,7 +51,7 @@
             "desc": "Log the random number generated above if greater than 50",
             "parameters": {"func": "format", "template": "Random number generated is {input}"},
             "__defaults": {"log_message": "info"},
-            "exec_if":["{rand_num} > 70"],
+            "exec_if":["rand_num > 70"],
             "__comment": "Execute this step only if conditions are met",
             "input_mapping": {"input": "rand_num"}            
         },
@@ -60,7 +60,7 @@
             "action": "FunctionRunner",
             "desc": "Log the random number generated above if less than or equal 20",
             "parameters": {"func": "format", "template": "Random number generated is {input}"},
-            "exec_if":["{rand_num} <= 10"],
+            "exec_if":["rand_num <= 10"],
             "input_mapping": {"input": "rand_num"}            
         },
         {
@@ -85,8 +85,8 @@
         { "from_step": "CWORDS", "to_step": "MULTISQL" },
         { "from_step": "MULTISQL", "to_step": "SUMROWS" },
         { "from_step": "SUMROWS", "to_step": "GENRAND" },
-        { "from_step": "GENRAND", "to_step": "LOGRAND1", "conditions": ["{rand_num} > 50"] },
-        { "from_step": "GENRAND", "to_step": "LOGRAND2", "conditions": "{rand_num} <= 20" },
+        { "from_step": "GENRAND", "to_step": "LOGRAND1", "conditions": ["rand_num > 50"] },
+        { "from_step": "GENRAND", "to_step": "LOGRAND2", "conditions": "rand_num <= 20" },
         { "from_step": "GENRAND", "to_step": "RESULT", "condition": "True" },
         { "from_step": "LOGRAND1", "to_step": "LOGRAND2" },
         { "from_step": "LOGRAND2", "to_step": "RESULT" }

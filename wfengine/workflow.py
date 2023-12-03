@@ -20,11 +20,7 @@ class Condition(BaseModel):
     expression_template: str
     """The expression template to check"""
 
-    def _get_ast_expression(
-        self, template, wf_context, step_name, step_parameters
-    ) -> str:
-        """Extract Prompt Variables and check the partial variables, if any"""
-
+    def evaluate(self, wf_context, step_name, step_parameters) -> bool:
         kwargs = {
             **wf_context["wf_parameters"],
             **step_parameters,
@@ -35,28 +31,12 @@ class Condition(BaseModel):
             "working_dir": wf_context["working_dir"],
         }
 
-        # Get the variables for the template
-        # template_variables = {
-        #     v for _, v, _, _ in Formatter().parse(template) if v is not None
-        # }
-        # logger.debug(f"Template Variables = {template_variables}")
-        # Actually, we dont need the template variables!
-        # kwargs = {k: v for k, v in kwargs.items() if k in template_variables}
-
-        ast_expression = template.format(**kwargs)
-        return ast_expression
-
-    def evaluate(self, wf_context, step_name, step_parameters) -> bool:
-        expression = self._get_ast_expression(
-            self.expression_template, wf_context, step_name, step_parameters
-        )
         try:
-            code = ast.parse(expression, mode="eval")
+            code = ast.parse(self.expression_template, mode="eval")
             codeobj = compile(code, "<string>", "eval")
-            expr_result = eval(codeobj)  # nosec
+            expr_result = eval(codeobj, kwargs)  # nosec
             logger.debug(
-                f"== Condition = {self.expression_template}; Expression = {expression}, "
-                f"Result = {expr_result}"
+                f"== Condition = {self.expression_template}; Result = {expr_result}"
             )
             return bool(expr_result)
         except SyntaxError as e:
