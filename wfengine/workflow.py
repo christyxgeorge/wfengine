@@ -50,14 +50,18 @@ class Condition(BaseModel):
         expression = self._get_ast_expression(
             self.expression_template, wf_context, step_name, step_parameters
         )
-        code = ast.parse(expression, mode="eval")
-        codeobj = compile(code, "<string>", "eval")
-        expr_result = eval(codeobj)  # nosec
-        logger.debug(
-            f"== Condition = {self.expression_template}; Expression = {expression}, "
-            f"Result = {expr_result}"
-        )
-        return bool(expr_result)
+        try:
+            code = ast.parse(expression, mode="eval")
+            codeobj = compile(code, "<string>", "eval")
+            expr_result = eval(codeobj)  # nosec
+            logger.debug(
+                f"== Condition = {self.expression_template}; Expression = {expression}, "
+                f"Result = {expr_result}"
+            )
+            return bool(expr_result)
+        except SyntaxError as e:
+            logger.error(f"Syntax error: {e}")
+            raise e
 
 
 class WFResult(BaseModel):

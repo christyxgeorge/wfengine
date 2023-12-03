@@ -94,7 +94,7 @@ class ErpRunner(BaseRunner):
             return {"saved": True, "status": RunStatus.COMPLETED}
         elif document_type == "INVOICE" and method == "UPDATE_STATUS":
             invoice_data = kwargs.get("data")
-            payment_status = kwargs.get("payment_status")
+            payment_status = kwargs.get("status")
             logger.info(f"Updated Invoice: {payment_status} // {invoice_data}")
             return {"saved": True, "status": RunStatus.COMPLETED}
         # else:
@@ -118,9 +118,12 @@ class PaymentRunner(BaseRunner):
         return {"invoice_data": "Invoice Data"}
 
     def output_keys(self) -> List[str]:
-        return ["triggered"]
+        return ["payment_status"]
 
     def run(self, **kwargs) -> Dict[str, Any]:
         """Run the extract action."""
-        logger.info(f"Payment triggered Action: {kwargs}")
-        return {"triggered": True, "status": RunStatus.COMPLETED}
+        min_amount = kwargs.get("min_amount", 1000)
+        inv_data = kwargs.get("invoice_data")
+        payment_status = "PAID" if inv_data["inv_amount"] > min_amount else "BATCHED"
+        logger.info(f"Payment {payment_status} Action: {kwargs}")
+        return {"payment_status": payment_status, "status": RunStatus.COMPLETED}
