@@ -1,0 +1,151 @@
+{
+    "name": "ACCOUNTS_PAYABLE",
+    "desc": "Execute automation of the accounts payable process",
+    "first_step": "EXTRACT_INVOICE",
+    "parameters": {
+        "verify_invoice_template": "The Invoice details are as follows {invoice_data}, Please check and confirm",
+        "approve_invoice_template": "The Invoice details are as follows {invoice_data}, Please approve"
+    },
+    "steps": [
+        {
+            "id": "EXTRACT_INVOICE",
+            "action": "ExtractPdfRunner",
+            "desc": "Extract structured information from the PDF file",
+            "input_mapping": { "pdf_file": "invoice_file_name" },
+            "parameters": { "document_type": "INVOICE" },
+            "output_mapping": { "data": "invoice_data" }
+        },
+        {
+            "id": "EXTRACT_PO",
+            "action": "ExtractPdfRunner",
+            "desc": "Extract structured information from the PDF file",
+            "input_mapping": { "pdf_file": "po_file_name" },
+            "parameters": { "document_type": "PO" },
+            "output_mapping": { "data": "purchase_order_data" },
+            "exec_if":["'{po_file_name}' != '' and {invoice_data[po_number]}"]
+        },
+        {
+            "id": "EXTRACT_GRN",
+            "action": "ExtractPdfRunner",
+            "desc": "Extract structured information from the PDF file",
+            "input_mapping": { "pdf_file": "grn_file_name" },
+            "parameters": { "document_type": "GRN" },
+            "output_mapping": { "data": "goods_received_data" },
+            "exec_if":["'{grn_file_name}' != ''"],
+            "__comment": "Need to handle multiple GRN files [MultipleGRNActionRunner]"
+        },
+        {
+            "id": "VERIFY_INVOICE",
+            "action": "VerifyInvoiceRunner",
+            "desc": "Verify the invoice data with the PO data and GRN data",
+            "parameters": { "method": "2-way" },
+            "output_mapping": { "verified": "invoice_verified" }
+        },
+        {
+            "id": "MANUAL_VERIFY_INVOICE",
+            "action": "ApprovalRunner",
+            "desc": "Send the results via email/or on UI and wait for confirmation",
+            "parameters": { 
+                "email_template": "verify_invoice_template", "email_subject": "Invoice Verification",
+                "retry_count": 0,  "retry_delay": 60, "timeout": 172800, "escalations": null 
+            },
+            "exec_if":["{invoice_verified} == False"],
+            "input_mapping": { "data": "invoice_data" },
+            "output_mapping": { "approved": "invoice_verified" }
+
+        },
+        {
+            "id": "APPROVE_INVOICE",
+            "action": "ApprovalRunner",
+            "desc": "Send the Data via email/or on UI and wait for confirmation",
+            "parameters": { 
+                "email_template": "approve_invoice_template", "email_subject": "Invoice Approval",
+                "retry_count": 0,  "retry_delay": 60, "timeout": 172800, "escalations": null 
+            },
+            "exec_if":["{invoice_verified} == True"],
+            "input_mapping": { "data": "invoice_data" },
+            "output_mapping": { "approved": "invoice_approved" }
+
+        },
+        {
+            "id": "SAVE_INVOICE",
+            "action": "ErpRunner",
+            "desc": "Save the Invoice Details into the ERP DB",
+            "parameters": { 
+                "db_url": "aws_secret:db_url", "db_password": "aws_secret:db_pwd",
+                "document_type": "INVOICE", "method": "SAVE"
+            },
+            "input_mapping": { "data": "invoice_data" },
+            "output_mapping": { "saved": "invoice_saved" },
+            "exec_if":["{invoice_approved} == True"]
+        },
+        {
+            "id": "AUTHORIZE_PAYMENT",
+            "action": "ApprovalRunner",
+            "desc": "Send the Data via email/or on UI and wait for confirmation",
+            "parameters": { 
+                "email_template": "auth_payment_template", "email_subject": "Invoice Approval",
+                "retry_count": 0,  "retry_delay": 60, "timeout": 172800, "escalations": null 
+            },
+            "exec_if":["{invoice_saved} == True"],
+            "input_mapping": { "data": "invoice_data" },
+            "output_mapping": { "approved": "payment_authorized" }
+        },
+        {
+            "id": "AUTHORIZE_PAYMENT_GT_10K",
+            "action": "ApprovalRunner",
+            "desc": "Send the Data via email/or on UI and wait for confirmation",
+            "parameters": { 
+                "email_template": "auth_payment_template", "email_subject": "Invoice Approval",
+                "retry_count": 0,  "retry_delay": 60, "timeout": 172800, "escalations": null 
+            },
+            "exec_if":["{payment_authorized} == True"],
+            "input_mapping": { "data": "invoice_data" },
+            "output_mapping": { "approved": "payment_authorized" }
+        },
+        {
+            "id": "TRIGGER_PAYMENT",
+            "action": "PaymentRunner",
+            "desc": "Trigger the payment if it is > USD 1,000, else add to payment batch",
+            "parameters": { "min_amount": 1000, "payment_url": "aws_secret:payment_url" },
+            "__output_mapping": { "payment_status": "payment_status" },
+            "exec_if":["{payment_authorized} == True"]
+        },
+        {
+            "id": "UPDATE_INVOICE",
+            "action": "ErpRunner",
+            "desc": "Save the Invoice Status (PAID) into the ERP DB",
+            "parameters": { 
+                "db_url": "aws_secret:db_url", "db_password": "aws_secret:db_pwd",
+                "document_type": "INVOICE", "method": "UPDATE_STATUS"
+            },
+            "input_mapping": {  "data": "invoice_data", "status": "payment_status" },
+            "output_mapping": { "saved": "invoice_paid" }
+        },
+        {
+            "id": "NOTIFY_USER",
+            "action": "NotificationRunner",
+            "desc": "Notify the user",
+            "parameters": { "user": "owner" },
+            "output_mapping": { "notified": "notification_status" }
+        }
+    ],
+    "transitions": [
+        { "from_step": "EXTRACT_INVOICE", "to_step": "EXTRACT_PO" },
+        { "from_step": "EXTRACT_PO", "to_step": "EXTRACT_GRN" },
+        { "from_step": "EXTRACT_GRN", "to_step": "VERIFY_INVOICE" },
+        { "from_step": "VERIFY_INVOICE", "to_step": "MANUAL_VERIFY_INVOICE" },
+        { "from_step": "MANUAL_VERIFY_INVOICE", "to_step": "APPROVE_INVOICE"},
+        { "from_step": "APPROVE_INVOICE", "to_step": "SAVE_INVOICE" },
+        { "from_step": "SAVE_INVOICE", "to_step": "AUTHORIZE_PAYMENT" },
+        { 
+            "from_step": "AUTHORIZE_PAYMENT",
+            "to_step": "AUTHORIZE_PAYMENT_GT_10K",
+            "conditions": ["{invoice_data[inv_amount]} > 10000"]
+        },
+        { "from_step": "AUTHORIZE_PAYMENT", "to_step": "TRIGGER_PAYMENT" },
+        { "from_step": "AUTHORIZE_PAYMENT_GT_10K", "to_step": "TRIGGER_PAYMENT" },
+        { "from_step": "TRIGGER_PAYMENT", "to_step": "UPDATE_INVOICE" },
+        { "from_step": "UPDATE_INVOICE", "to_step": "NOTIFY_USER" }
+    ]
+}

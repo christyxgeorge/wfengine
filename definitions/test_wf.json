@@ -1,0 +1,94 @@
+{
+    "name": "WF_TEST",
+    "desc": "Execute a series of text and get confirmation from a user",
+    "first_step": "GSEARCH",
+    "parameters": {
+        "message_template": "The results are as follows: {nrows} extracted\nLog Message = {log_message}"
+    },
+    "steps": [
+        {
+            "id": "GSEARCH",
+            "__id": "When we have an UI, we can generate the ID automatically in the FE",
+            "action": "SearchRunner",
+            "desc": "google search & return the top 'n' results as texts",
+            "parameters": { "num_results": 2 },
+            "output_mapping": { "search_results": "sresults" }
+        },
+        {
+            "id": "CWORDS",
+            "action": "FunctionRunner",
+            "desc": "count the number of words in each of the results",
+            "parameters": { "func": "num_words" },
+            "input_mapping": { "input": "sresults" },
+            "output_mapping": { "func_result": "swords" }
+        },
+        {
+            "id": "MULTISQL",
+            "action": "MultiActionRunner",
+            "desc": "run 'n' sql queries in parallel",
+            "parameters": { "action": "SqlRunner" },
+            "input_mapping": { "inputs": "queries" },
+            "output_mapping": { "results": "query_results" }
+        },
+        {
+            "id": "SUMROWS",
+            "action": "FunctionRunner",
+            "desc": "Total number of rows across both SQL results",
+            "parameters": { "func": "sum_rows" },
+            "input_mapping": { "input": "query_results" },
+            "output_mapping": { "func_result": "nrows" }
+        },
+        {
+            "id": "GENRAND",
+            "action": "FunctionRunner",
+            "desc": "Generate a random number between 1 and 100",
+            "parameters": { "func": "gen_rand", "input": "1,100" },
+            "output_mapping": {"func_result": "rand_num"}  
+        },
+        {
+            "id": "LOGRAND1",
+            "action": "FunctionRunner",
+            "desc": "Log the random number generated above if greater than 50",
+            "parameters": {"func": "format", "template": "Random number generated is {input}"},
+            "__defaults": {"log_message": "info"},
+            "exec_if":["{rand_num} > 70"],
+            "__comment": "Execute this step only if conditions are met",
+            "input_mapping": {"input": "rand_num"}            
+        },
+        {
+            "id": "LOGRAND2",
+            "action": "FunctionRunner",
+            "desc": "Log the random number generated above if less than or equal 20",
+            "parameters": {"func": "format", "template": "Random number generated is {input}"},
+            "exec_if":["{rand_num} <= 10"],
+            "input_mapping": {"input": "rand_num"}            
+        },
+        {
+            "id": "DELAY",
+            "action": "DelayActionRunner",
+            "desc": "Introduce an artificial delay of 'n' seconds",
+            "parameters": { "delay": 86400 },
+            "__comment": "Currently not used"
+        },
+        {
+            "id": "RESULT",
+            "action": "ApprovalRunner",
+            "desc": "Send the results via email and wait for confirmation",
+            "parameters": { 
+                "email_template": "message_template", "email_subject": "Workflow result",
+                "retry_count": 0,  "retry_delay": 60, "timeout": 172800, "escalations": null 
+            }
+        }
+    ],
+    "transitions": [
+        { "from_step": "GSEARCH", "to_step": "CWORDS" },
+        { "from_step": "CWORDS", "to_step": "MULTISQL" },
+        { "from_step": "MULTISQL", "to_step": "SUMROWS" },
+        { "from_step": "SUMROWS", "to_step": "GENRAND" },
+        { "from_step": "GENRAND", "to_step": "LOGRAND1", "conditions": ["{rand_num} > 50"] },
+        { "from_step": "GENRAND", "to_step": "LOGRAND2", "conditions": "{rand_num} <= 20" },
+        { "from_step": "GENRAND", "to_step": "RESULT", "condition": "True" },
+        { "from_step": "LOGRAND1", "to_step": "LOGRAND2" },
+        { "from_step": "LOGRAND2", "to_step": "RESULT" }
+    ]
+}
