@@ -30,13 +30,15 @@ def list_str(values):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(prog="wflow", description="Workflow Engine")
+    parser = argparse.ArgumentParser(prog="wfengine", description="Workflow Engine")
 
     parser.add_argument("-v", "--verbose", action="store_true", default=False)
     parser.add_argument(
         "--debug", action="store_true", default=False, help="using debug mode"
     )
-    parser.add_argument("-w", "--workflow", type=str, help="workflow name to run")
+    parser.add_argument(
+        "-w", "--workflow", type=str, help="workflow name to run", required=True
+    )
     parser.add_argument(
         "-o",
         "--owner",

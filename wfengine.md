@@ -53,33 +53,45 @@ The test_wf workflow is defined at `./definitions/test_wf.json`. It does the fol
 # Installing the `wfengine` software
 
 - Python requirements = python >= 3.10
+- Clone the repo from github.
+
+  > git clone https://github.com/christyxgeorge/wfengine.git
+
+- Change path to the directory created by cloning the repo.
+
+  > cd wfengine
+
 - Install Other packages needed
 
   > pip install --upgrade -r requirements.txt
 
-- Clone the repo from github
-  >
+- Run to display help
+  > python main.py --help
 
 # Run the accounts_payable workflow
 
-Run the following commands: Note that the input parameters have been hard-coded in main.py
+Run the following commands:
+_Note that the input parameters have been hard-coded in main.py_
 
 > python main.py --verbose --workflow accounts_payable
 
 The last line of the output should show the transaction ID
-Workflow ACCOUNTS_PAYABLE / Step APPROVE_INVOICE / 466c648c-c680-4d66-b8c0-7b6b62487da4 => RunStatus.WAITING // Waiting for approval
+
+_Workflow ACCOUNTS_PAYABLE / Step APPROVE_INVOICE / 466c648c-c680-4d66-b8c0-7b6b62487da4 => RunStatus.WAITING // Waiting for approval_
 
 Execute the command with -t last [will use the last transaction id from the DB]
 
 > python main.py --verbose --workflow accounts_payable -t last
 
 After the first, approval, it will now be waiting at the next step that requires approval.
-Workflow ACCOUNTS_PAYABLE / Step AUTHORIZE_PAYMENT / 466c648c-c680-4d66-b8c0-7b6b62487da4 => RunStatus.WAITING // Waiting for approval
+
+_Workflow ACCOUNTS_PAYABLE / Step AUTHORIZE_PAYMENT / 466c648c-c680-4d66-b8c0-7b6b62487da4 => RunStatus.WAITING // Waiting for approval_
 
 > python main.py --verbose --workflow accounts_payable -t last
 
 Now the workflow will be completed
-Workflow ACCOUNTS_PAYABLE / Step NOTIFY_USER / 466c648c-c680-4d66-b8c0-7b6b62487da4 => RunStatus.COMPLETED // Workflow Completed
+
+_Workflow ACCOUNTS_PAYABLE / Step NOTIFY_USER / 466c648c-c680-4d66-b8c0-7b6b62487da4 => RunStatus.COMPLETED // Workflow Completed_
 
 # Run the test_wf workflow
 
@@ -88,18 +100,52 @@ Run the following commands:
 > python main.py -w test_wf --search-term "Artificial Intelligence" --verbose \
 >  --approvers=xyz@example.com,mop@example.com
 
-The last line of the output should show the transaction ID
-Workflow WF_TEST / Step RESULT / 34b46dc9-3eae-4d84-b6bb-d7f29da7e234 => RunStatus.WAITING // Waiting for approval
+The last line of the output should show the transaction ID.
+
+_Workflow WF_TEST / Step RESULT / 34b46dc9-3eae-4d84-b6bb-d7f29da7e234 => RunStatus.WAITING // Waiting for approval_
 
 > python main.py -w test_wf --transaction-id last --verbose --approved-by xyz@example.com
 
 After the first, approval, it will still be waiting!
-Workflow WF_TEST / Step RESULT / 34b46dc9-3eae-4d84-b6bb-d7f29da7e234 => RunStatus.WAITING // Step [Waiting]
+
+_Workflow WF_TEST / Step RESULT / 34b46dc9-3eae-4d84-b6bb-d7f29da7e234 => RunStatus.WAITING // Step [Waiting]_
 
 > python main.py -w test_wf --transaction-id last --verbose --approved-by mop@example.com
 
 Now, you should see that the workflow has completed
-Workflow WF_TEST / Step RESULT / 34b46dc9-3eae-4d84-b6bb-d7f29da7e234 => RunStatus.COMPLETED // Workflow Completed
+
+_Workflow WF_TEST / Step RESULT / 34b46dc9-3eae-4d84-b6bb-d7f29da7e234 => RunStatus.COMPLETED // Workflow Completed_
+
+# Implementation Details
+
+The Workflow definitions are created as JSON files. This is to help focus on the workflow orchestrator.
+
+The JSON workflow definitions are available in ./definitions/ folder. The definitions are
+
+- test_wf.json => An arbitrarily construction workflow for testing
+- accounts_payable.json => A workflow that encapsulates the basic tenets the accounts payable process.
+
+The 'data' classes in this implementation are
+
+- Workflow -> Static data related to the loaded workflow [from the JSON definitions file]
+- WFStep -> Static data related to the step definitions.
+- WFTransition -> Static data related to the transition definitions.
+- Condition -> An expression evaluator (uses AST) to determine conditions for next step and exec-if step conditions.
+- WFResult -> A result class that encapsulates the response of a step execution.
+- RunStatus -> Enum which defines the different status for any action executed.
+
+The classes that implement the actual orchestration are
+
+- BaseRunner -> Base classes for both WFRunner, Other Action Runners
+- WFRunner -> Runs the Workflow specified in the command line.
+- Action classes defined in ./wfengine/actions/ directory [basic_actions.py and ap_actions.py]. These available actions are auto-discovered when the process starts up.
+- The ApprovalActionRunner class is used to show resumption of a manual over-ride approval process.
+
+The main entry point is defined in the python file main.py.
+
+- Curently, there are some hard-coded values for input parameters to make it easy to test.
+- The Sqlite3 DB which is needed for the WF transactions (to maintain approval state across runs) is auto created if not available.
+- When resuming workflows, the transaction ID is needed. If you specifiy -t last, the program retrieves the last transaction ID in the DB and tries to resume that.
 
 # Final Comments
 
@@ -115,3 +161,4 @@ There are still a lot of things that can be done to improve this.
 - The DB schema is extremely primitive.
 - Hot loading of new actions is not possible.
 - While there exists sub-workflow support, it has not been tested.
+- The exec-if in the step definition seems redundant as there are conditional transitions supported.
