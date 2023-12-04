@@ -32,16 +32,24 @@ class Condition(BaseModel):
         }
 
         try:
-            code = ast.parse(self.expression_template, mode="eval")
+            # Formatting the string with the context enables us to ensure that variable
+            # substition happens before we do the ast.parse, compile, eval. Probably
+            # more secure this way. But format is limited compared to the 'eval/globals'
+            # expression = self.expression_template.format(**kwargs)
+            expression = self.expression_template
+            code = ast.parse(expression, mode="eval")
             codeobj = compile(code, "<string>", "eval")
             expr_result = eval(codeobj, kwargs)  # nosec
             logger.debug(
                 f"== Condition = {self.expression_template}; Result = {expr_result}"
             )
             return bool(expr_result)
-        except SyntaxError as e:
-            logger.error(f"Syntax error: {e}")
-            raise e
+        except KeyError as ke:
+            logger.error(f"Key error while doing a format: {ke}")
+            raise ke
+        except SyntaxError as se:
+            logger.error(f"Syntax error ast.parse/compile/eval: {se}")
+            raise se
 
 
 class WFResult(BaseModel):
