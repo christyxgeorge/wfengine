@@ -1,0 +1,273 @@
+
+Tech Flow
+==================================
+- System Configuration
+    - Default timeouts, retry policies for each agent (Workflow step) including default retry-able failures. [NOTE: The only retry-able errors that i can think of are systemic and not wf based: Network failures, DB Query failures?]. So, maybe, they dont need to be configurable!
+    - Default WF templates for each of the supported processes!
+    - Default input/output schema for each supported task, pdf document types.
+
+- Customer Onboarding
+    - Need to configure the ERP Access details [We will have 'plugins' for the more common ERPs/Databases].
+    - Customer Information in the customer database. Customer Name will also be used to check the authenticity of the Invoice as well. May need customer name aliases in case they use different names with different suppliers???
+    - Supplier informations in the supplier database. [Including Supplier email domains]
+    - Sender email addresses should be defined as users on the system. Valid domains?
+    - Processes enabled for the user (AP, AR, EXPENSE, etc)
+        - Currently, we assume that only the 'AP' process is available.
+    - Batch Processor configuration
+        - Currently the only option is a MailProcessor with a specified IMAP configuration [User ID, Authentication Information]. This should be stored in something like AWS Secrets from a security perspective.
+        - Rules to identify/verify the workflow process based on the mail attributes.
+    - Workflow configuration for the chosen processes:
+        - Customize the workflow from a system provided default. Customer can add/remove/configure steps. [Haven't thought through on the 'add' part]
+        - Number of follow-ups. Maximum time before escalation.
+        - Escalation rules [Amount, department, failure reason based]
+        - Total time after which it is marked FAILED!
+        - Approval Users to be defined in the system. Can be different for each step?
+
+- Batch Processor (A Scheduled Cronjob)
+    - The MailProcessor will run periodically and scan through the received mails. [IMAP Configuration needed for this]. We may need to manage state so that we dont process the same email multiple times. To not manage state, we can only fetch the "Unread/Unseen Emails".
+    - Listens to all the email addresses defined across customers. We can scale based on the load per customer. There can be multiple processors configured each with a set of email addresses to listen
+    - If we are integrating with each customer's email system, customer identification is easy.
+    - In case they are forwarding it our mail server, then we will create separate email IDs for each customer.
+    - Identifies Invoice emails [Screening]
+        - Validate that 'sender' is defined as an user in the system [DONT KNOW IF THIS NEEDED]
+        - Simple rules based on email fields Subject contains 'Invoice', Sender = 'xyz@abc.com', etc.
+        - [LATER] Maybe compute a score to eliminate possibility of missing any invoices where the system is unsure???
+    - Identifies Approval emails [For Manual Approval Steps]
+    - In case there are dedicated email addresses for wf processing, any unidentified email will be logged with a reason [No attachment, Unknown Sender etc]
+    - Generate a transaction ID.
+        - This will be an UUID [At this point, we dont have an Invoice ID]
+    - Identify/Extract Invoice file from the attachment.
+        - Additionally, check if PO and Goods Received Note are also attached. [DONT KNOW IF THIS HAPPENS?]
+        - Create a working directory for this invoice with the generated transaction ID. [This will need to be accessed across machines, so maybe AWS S3 or AWS EFS based on latency needs]
+        - Save the invoice file in the working directory
+    - Invokes the Orchestrator with the AP Workflow.
+        - Inputs = [Working directory, Invoice filename, Mail metadata (Useful for audit purposes), Mail body -> Maybe some info here as well?]
+        - Creates a transaction entry in a DB initiating the workflow with the working directory and the inputs [Status = NEW, Key = above UUID] => Do we need this??
+        - Create a JSON with the transaction id, inputs and also store it in the working directory. In case the PO, GRN are also stored, include the file names for those as well in the JSON.
+        - Invokes the Orchestrator by pusing the request to a message queue with the transaction ID. [and/or the above JSON?] with action = CREATE.
+
+- Orchestrator
+    - Listening to a Message Queue [or Kafka/Confluent]
+    - Provided as a REST API to start invocation
+        - which also posts a message to the message queue (action = CREATE)
+    - Provided as a REST API to restart invocation after a manual over-ride
+        - which also posts a message to the message queue (action = CONTINUE, step = <step_name>)
+    - Auto discovery of agents supported by the system.
+    - Since agents are `code`, live addition of agents will not be possible [Unless, we support a script functionality on the UI]
+    -
+
+- Report/Audit
+    - List of Invoices Processed (Date, Sender) and the status so that an 'admin' can follow through. Useful in case escalations are completed.
+    - Ability to filter for Failed Invoices and failure reasons.
+        - In case of tech error (ocr failure) etc, ticket can be auto-created??
+
+Workflow Schema
+==================================
+WF Definition: {
+    name: 'AP'
+    desc: 'lorem ipsum ...'
+    inputs: { // Maybe these can be used to auto-create an UI form!
+        invoice_file_name: STRING
+        po_file_name: OPTIONAL[STRING]
+        grn_file_name: OPTIONAL[STRING]
+    }
+    steps: [
+        {
+            agent: 'EXTRACT_PDF'
+            name: 'Extract Invoice Info from PDF'
+            doc_type: 'INVOICE'
+        },
+        {
+            agent: 'EXTRACT_PDF'
+            name: 'Extract PO Info from PDF
+            doc_type: 'PO'
+            condition = [{
+                key: 'inputs.po_file_name', condition: 'is not' value: NULL
+            }]
+        },
+        {
+            agent: 'EXTRACT_PDF'
+            name: 'Extract GRN Info from PDF
+            doc_type: 'GRN'
+            condition = [{
+                key: 'inputs.grn_file_name', condition: 'is not' value: NULL
+            }]
+        },
+        {
+            agent: 'VERIFY_INVOICE',
+            name: 'Verify Invoice Details',
+            method: '2WAY' or '3WAY'
+        },
+        {
+            agent: '',
+            name:
+        }
+    ] // End of steps
+}
+
+Agent Configuration: {
+    'EXTRACT_PDF': {
+}
+
+WF Context: {
+    transaction_id: UUID # Generated by API, Batch Processor
+    metadata: DICT[STRING, STRING] # { 'source': 'api|mail', other k-v pairs }
+    working_dir: STRING # 's3://a.b.c/xx/{transaction_id}'
+    inputs: { invoice_file_name, po_file_name, grn_file_name }
+
+
+}
+
+
+
+Scope and Assumptions
+==================================
+
+Failure Schema: {
+    reason: string
+    details: string // much longer with specific values etc.
+    criticality: string // Different domain is considered security issue?
+}
+
+Common attributes for WF/Task
+    soft_timeout: int = 0
+    hard_timeout: int = 0
+    retry: varchar [JSON]
+    - {count: 0} # Dont retry
+    - {count: 2, interval: x, backoff_strategy: 'exponential' or 'fixed'}
+
+    # notifications
+    # If user_ids are NULL, send to only 'owner' [Assumption]
+    - on_completion: varchar { notification_template, user_ids or NULL }
+    - on_task_retry: varchar { notification_template, user_ids or NULL }
+    - on_timeout: varchar { notification_template, user_ids or NULL }
+    - on_failure: varchar { notification_template, user_ids or NULL }
+
+Common attributes for all tables
+    created_by: fk to user_id
+    created_at: timestamp
+    last_modified_by: fk to user_id
+    last_modified_at: timestamp
+
+Available Tasks
+    - Platform Tasks [Typically code] [Task Group = 'SYSTEM']
+        - Fork Task [Allow forking into Sub-DAGs based on condition]
+            - Condition (based on the prev task return JSON)
+            - Condition/next_task mapping.
+        - Join Task [Allow waiting for multiple Sub-DAGs to complete]
+            - Task IDs to wait for and optionally conditions
+        - NoOp Task [Dont know for now how it will be used...]
+            - Mostly not needed!
+        - Manual Approval Task
+            - medium [sms, whatsapp, email]
+            - message_template [maybe, include medium with the template]
+            - link to go approve from. when user clicks on the approve button, the task completes [based on the button]
+            - timeout: x secs/mins. [Retry induced at timeout]
+                - expire old link, resend notification?
+            - fallback_approver
+            - what if we need to pick up a user based on specific role?
+        - Delay Task
+            - artificially introduce delay between two tasks.
+    - Generic Enterprise tasks [Task Group = 'ENTERPRISE']
+        - LLM Task
+            - call generative assistant and send the response?
+        - SQL Query Task
+            - This is dangerous...
+        - OCR Task
+            - Maybe we need this for reading invoices?
+        - PDF Extraction Task
+            - Extract data (structured/unstructured)
+        - API Tasks. [Add an API as a task]
+    - No code tasks [These are editable]
+        - Should be available on the UI [Authentication?]
+        - Custom Chained Tasks [Sequential chaining of predefined tasks]
+            - Can be useful if we have generic atomic tasks that need to be combined [Say Multiple LLM Tasks can be chained]
+        - Configured Tasks
+            - Tasks with a pre-specified configuration
+    - Precreated business logic tasks.
+        - These could also be precreated by chaining existing generic tasks.
+        - AP Tasks
+        - HR Tasks
+        - and more...
+
+Common Attributes of WF, Task
+    - timeout_secs [over-ride at a task level]
+        - force the WF to end/alarm if it exceeds this period...
+        - can have soft_timeout for warning and hard_timeout for killing..]
+        - Need to figure out how to kill running tasks?
+    - retry [over-ride at a task level]
+        - {count: 0} # Dont retry
+        - {count: 2, interval: x, backoff_strategy: 'exponential' or 'fixed'}
+    - notification [over-ride at a task level]
+        - on_completion: None|only_on_failure
+        - on_task_retry:
+        - on_timeout: owner [and/or other stakeholders]
+        - on_failure: owner [and/or other stakeholders]
+    - version: In case we need multiple versions available concurrently.
+    - active: True/False --> to disable the workflow..
+        - PUBLISHED or UNPUBLISHED
+    - the CRUD essentials: ctime, lmtime, create_user, lm_user
+    NOTE: Task level attributes will over-ride the WF level attributes
+
+Capabilities used across tasks [Can these be tasks themselves]
+    - Notification
+        - medium [sms, whatsapp, email, app_fcm]
+        - message_template [which template to use]
+        - SMS, Whatsapp delivery status???
+    - Save Data to Context
+        - to share data across all Tasks?
+    - Save Artifacts
+        - in case we want to move artifacts to S3 etc...
+        - and make it available for following tasks in the WF
+        - Run specific files to be stored with run_id???
+        - Upload to 3rd party system...
+    - Publish Event
+        - to allow tasks to send info for later analysis [Grafana/Kibana/etc]
+
+
+Workflow run
+    - run id: [for each run of the workflow]
+    - triggered_by: [some entity]
+        - Need to ensure that the triggering entity is authorizated!
+    - workflow id: the workflow id -- Includes org_id
+    - workflow context: K, V data to be shared across tasks?
+        - in case the first task wants to share data with the 5th task...
+        - use redis for this?
+    - artifact_urls:
+        - list of artifacts available in this WF.
+        - we assign a specific directory in S3 for these files
+        - types: images, pdf files, etc...
+    - stage: [current completed task in the workflow]
+        --> Create a detail table for workflow task with the same run_id...
+    - status [queued, started|running, completed, failed, killed]
+    - start_time, completion_time [and some stats]
+
+Task Run
+    - Status: RUNNING, WAITING, SUCCESS, FAILURE_RETRY, FAILURE
+        - Waiting for approval
+        - If task has been skipped (branched out) then we infer that for display in the UI...[Or we add another status - SKIPPED]
+    - start_time, completion_time, retry_count [and other stats]
+
+WF Invocation
+    - Task Invocation Params
+        - Input: { run_id, workflow_id, wf_params, prev_task_return }
+        - Output: return JSON...
+
+
+
+Event Logging:
+    - Inbuilt WF events like wf_started, task_started... etc.
+    - WF/Task Events to be sent to some external system....
+    - Sort of viewable on Kibana/Grafana etc?
+
+Load Considerations:
+    - Number of concurrent WFlows running...
+Other things
+    - OpenAPI/Swagger?
+    - Async --> FastAPI for python
+    - DB Schema Design
+    - Validations/Permissions?
+        - who is allowed to edit tasks/wflow?
+    - We may need a rule engine?
+    - Billing, API Throttling for WF/Task usage to be added later...
+    - Multi-lingual/RTL support not for now...

@@ -1,0 +1,403 @@
+Workflow Engine.
+==================================
+
+Multi-step approval flows. Where the originator initiates the request[form] and it moves from step to step (person to person) till the final step is completed.
+
+Example: JIRA which mainly focusses on Issue Tracking. However, at OnMobile, we had built a internal tool (for HR, Procurement, Performance Appraisal etc) using a internally customized version of Jira.
+
+Business Use Case - Employee Leave Application
+    - Flow: Employee -> Manager -> HR --> Approved/Rejected.
+    - Form Data: Leave from, Leave to, Reason.
+    - Manager possibly checks project criticality during the leave period
+    - HR possibly checks # leaves available from a System of Record.
+
+Most of the time, i expect that there will be pre-defined tasks/workflow that will be customized. New step/workflow creation will be largely internal in nature as this 'library' of steps/worklows is what will drive sales of the product. [These system provided steps/workflows will need to be available across the various organizations on-boarded onto the system]
+
+Scope and Assumptions
+==================================
+The various things that need to be considered:
+    - Form:
+        - Each step/task is largely a UI form with specified fields/layout including visibility criteria.
+        - Currently, a form is created in context of the workflow. [that is, one form cannot be used in multiple workflows]
+    - Step:
+        - The Workflow step with customizable parameters.
+    - Transition:
+        - Next step is chosen based on the available/defined transitions.
+        - Next assignee is chosen by the current assignee. The list of next assignees can be trimmed based on assignee_attributes defined in the step.
+            - Manager --> look up the manager_id of the user.
+            - HR --> look up all users who have dept = 'HR'
+        - Assignee can move the task to another assignee within the same step when he/she is busy and wants a colleague to look at it.
+        - Any person with valid permissions can assign the task to themselves when the assigned colleague is 'off' on an extended holiday.
+    - Artifact/Attachment:
+        - File types can be text/documents, images and maybe videos!
+        - For video files, maybe restrict the time duration (say 1min).
+        - File uploads can be `take a photo` as well.
+        - File storage mechanisms. Smaller files (< 1MB) can be stored as a blob in the DB. Larger files can be on S3 (or equivalent). The directory structure can be used to easily locate the file. <prefix>/<org_id>/<wf_group>/<wf_run_id>/. [But another org user should not be able to rewrite the URL to access unauthorized files]
+        - For image files, we can pre-create thumbnails for use in the Web/App UI.
+        - If we support video files, we should also consider video playback tools which support buffering and other capabilities.
+    - Comment
+        - Include initial creator notes, user comments and stage transition reasons.
+        - We will not allow file uploads within comments.
+    - SLA & Escalations [If the assignee doesnt complete the task, it will move based on escalation configuration]
+    - Notifications
+        - can be configured for different pre-defined events. Example: action_moved [user/step], workflow_completed [status], file_uploaded, commented.
+        - We can create pre-defined notification templates for these events with support for Email based notifications. Most of the time, i expect the pre-defined notification templates to be used as is.
+        - Anyone with permission can add themselves to the 'Watch' list to receive notifications. Default list will be the initiator and the stakeholders.
+        - Current stakeholders can add additional stakeholders.
+    - Rules Engine/Rules Editor
+        - For various conditions that need to be defined at various places.
+    - Creation of the Worflow can itself go through a workflow process. So that an employee can create the WF and a department manager can approve the workflow before it is published.
+
+Additional Notes:
+    1. Initially, notifications will be Email only. SMS/Whatsapp/InApp can be added later.
+    2. Bulk 'initiation' of WF from a system on behalf of multiple users will not be considered in this exercise.
+    3. Onboarding a customer/organization and setting up their defaults into this setup is out of scope for the current exercise.
+    4. We can allow for automated 'bots' or 'assistants'. But we won't consider it for this exercise. A particular form can be configured for a specific bot. For example: A data extraction bot can use an uploaded file to auto-fill the form.
+    5. Any reports/dashboards etc are not considered in this exercise.
+    6. While i mention SLA/Escalations, i have not dealt with them in considerable depth.
+    7. Will be nice if we can pre-fill some data just when the user creates a new ticket (WF). For example, the Number of leaves available to the user is pre-filled. [Simple Query definition/Rules Editor will be needed here as well]
+
+
+Workflow creation
+==================================
+1. Create a form that encapsulates the data needed for the process flow. We will create a Drag/Drop interface to define the form and the fields associated with the form.
+    - We will also need a form builder library to handle the form creation UI. At Streamz, we used surveyJs.io, which also had the ability to create custom components [plugins]. We had created a custom plugin to capture input from a mobile phone camera.
+    - We will assume that the library will return the layout configuration and properties as a JSON.
+    - The properties would include visibility criteria for the fields. [For example: A particular field can be hidden for some stages and made available at other stages]
+2. Create the workflow steps and transitions to move the form from stage to stage till the final step is completed. We will create a Drag/Drop interface to define the Workflow.
+    - We can use [reactflow or gojs] to create the graph of tasks/steps. We will assume that the library returns a JSON representation of the graph and node properties along with the layout information.
+    - Both nodes (steps) and transitions can be defined with this GUI.
+    - The step name will be used as the transition selector.
+3. Optionally, define SLAs and escalation needed to ensure completion of the workflow. These will need to be defined at the step level. [Maybe, the workflow has default SLA settings and the step can over-ride them if needed]
+4. Optionally, define notification settings for the workflow. Define the stakeholders and choose specific events for notification.
+
+User Interface
+==================================
+- User Login/Authentication: Attached to specific organization within the multi-tenancy setup. On successful login, take to the landing page.
+- Landing Page: List pre-created workflows with action buttons.
+    - Tabs based on Workflow Group [ HR | AP | ... ]
+    - Customized based on role/department of the user.
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+| Work flow          | Group  | Actions                      [Add WF] [Search] |
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+| Leave Application  | HR     |     [View] [Edit] [Clone] [Pref] [Form] [Runs] |
+| Claim Expense      | HR     |     [View] [Edit] [Clone] [Pref] [Form] [Runs] |
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    - Add Workflow
+        - Same as the View/Edit Workflow but with a blank canvas!
+    - "View/Edit" action button
+    - "Clone" action button
+        - Existing workflow... Blank out parameters that need to be re-filled.
+    - "Form" action buttom
+        - To View/Edit the attached form.
+    - "Preferences" action button
+        - The WF parameters that can be edited/saved..
+    - "Runs" action button
+        - List of previous runs for a specific period...
+        - Some graph of run statistics?
+    - Clicking on the workflow name allows you to trigger the Workflow
+- View/Edit Workflow
+    - Contains of 3 sections [control palette, canvas and settings panel].
+    - The control palette has a list of components that the user can drag on to the canvas.
+        - the list of predifined steps/forms and transitions
+        - a blank new step/form. [to create/add a custom step]
+        - transition lines
+    - The canvas is the place where the DAG [or form layout] is assembled.
+        - Steps are dropped into the canvas.
+        - Connect two step by dragging the transition between the two actions. Not allowed to connect a control to itself.
+    - The settings panel will show the setting for the current highlighted action or the workflow settings. The settings panel can be made collapsible to increase the real-estate for the canvas.
+- View/Edit Form
+    - UI similar to the workflow UI.
+    - Control palette has the list of UI controls that the user can drag/drop to the canvas.
+        - UI components such as Dropdown, Text, Radio Button, etc
+        - Layout components such as Grid, Row, Column etc.
+    - Settings Panel will show the properties of the selected ui control control or the overall form settings will be shown.
+    - The UI controls can have visibility criteria to handle visibility based on the step.
+- Search
+    - A JIRA type search based on filtering on various fields
+    - A Natural language search across can also be implemented!
+- Common Admin Screens [Design/Details of these are out of scope]
+    - Setup User/Role/Department (for a specific company)
+    - Setup Notification Templates for use in creation of WF/Tasks..
+    - Setup permissions for a company @ WF, Designation, Department
+    and more...
+
+Customization Possibilities for Workflow and Action/Step(s) Definition
+===================================
+
+Workflow Attributes
+    - Graph layout information [as provided by the library used]
+    - Steps - List of Steps [See below for step attributes]
+    _ Workflow Parameters
+        - Workflow Group this has to be included in. This is based on the user department!
+        - Name, Description.
+    - Permission Parameters [Controls visibility]
+        - Department => NULL = WF is public. Or available only to a specific department.
+        - Designation => NULL = WF is visible to all the users. Else, only people with that designation can view the WF.
+        - List of Designations/Departments can be considered later.
+        - Other parameters to control visibility are geo related [city, state, country] or designation levels (M5 and above)...
+        - Later, we can also do exclusion criteria. Say all Departments except HR.
+        - Can build a simple rules editor [Variable, Condition, Value]
+    - SLA/Escalation preferences
+        - Time Period [2h, 2d]
+        - Escalate to "Assignee's manager" by default.
+        - Can be set to None
+    - Notification preferences
+        - Select events to notify stakeholders on. Default is all events
+        - Define Stakeholders. Default is None. When the user initiates a workflow, he is added to the list of stakeholders
+        - Watch List - Additional people who have subscribed for notifications
+    - Workflow Access URL [Later]
+        - Possibly allow customer to define a URL slug (can be easily shared).
+
+Step Attributes
+    - Step Name [This is the stage name] which the user chooses to transition.
+    - Assignee Picker. To define which assignee to display to the user.
+        - Simple rules editor to define the conditions
+        - Variable, Condition, Value
+        - variables from the 'user' table.
+    - Allowed transitions - List [Next Steps]
+    - SLA/Escalation preferences
+        - Default is None
+        - Time Period [2h, 2d]
+        - Escalate to "Assignee's manager" by default.
+
+Form/Action Attributes
+    - Field Layout Information [as provided by the library used]
+    - Field Information - List of Field Attributes
+
+Field Attributes
+    - Field Type
+    - Dropdown Choices: Based on rules from the DB.
+    - Validation Criteria: Simple rules editor [Range, etc]
+    - Visibility Criteria: Simple rules based on WF.stage
+
+
+Components and Tech Stack
+==================================
+1. FE: Angular or React. Either one is OK. Angular includes the kitchen sink so library hunting is needed less.
+2. BE Rest APIs: Python with Flask/FastAPI (and nginx) or NodeJS would be the options that i would consider. Java/Springboot is also an option. THis is just a personal preference.
+3. BE Scheduled Jobs: We will need periodically scheduled jobs to handle SLA/escalations. In python, we can use Celery with a redis MQ. I am sure that there are similar tools in all the toolchains recommended above. And this can be deployed as a separate container if needed.
+4. BE Notification Handling: The Rest APIs will push the events to pub/sub Message Queue and a backend job will process them.
+5. Database [See 'Deployment Considerations']
+
+
+Deployment Considerations
+==================================
+1. SaaS deployment on a cloud [AWS | GCP | Azure]
+    - First criteria is checking if we get credits from the cloud providers.
+    - Else, my personal preference is AWS followed by GCP. Below, i assume that it is AWS.
+2. DB
+    - My first preference will be Postgres as it has native FTS and PgVector. allows us to not invest extra in a specific search/indexing tools. Otherwise MariaDB/MySQL which has FTS but no vector search. We can also consider MongoDB as this is not a transaction oriented system. And MongoDB also includes FTS and vector search [But, Mongo also has a learning curve].
+    - I would use AWS RDS or equivalent to reduce management headaches. if cost is an issue, we can set it up on AWS EC2.
+    - We can setup redundancy and Multi-AZ setup for the DB. But this increases cost and is probably not needed in the initial days.
+    - Backup to be setup. Say incremental backup every 6 hrs and a full backup every week.
+3. Load Balancer
+    - AWS ALB or HA Proxy [AWS ALB is preferred because it reduces management headaches.
+4. Rest API Deployment
+    - Use docker containers for the deployment. Can use Kubernetes or AWS Fargate clusters so that scalability can be done externally. Fargate is cheaper on AWS!
+    - Can also check Serverless deployments. But i believe, the cost is a bit higher specially when there is scale.
+5. Message Queue (or Pub/Sub)
+    - Can use AWS SQS or similar initially.
+    - Another option is to use AWS Kinesis [Kafka/Confluent] as it is better for scale.
+6. Caching Needs [Redis]
+    - Probably not needed in the initial days.
+    - But we can store open workflow context as a KV redis DB. so that access time is reduced.
+7. Search, Indexing: Can leverage DB provided capabilities. In the case of MariaDB, we can setup OpenSearch to handle text search.
+8. Logging:
+    - Can provide mechanisms to dump event logs [access logs, app events etc] to a central location that can be explored via a Grafana/Kibana interface.
+9. Alarms/Monitoring:
+    - Initially use AWS Cloudwatch to configure them. Can set alarms on metrics defined in AWS [DB CPU usage, DB Connections, Free diskspace etc]
+10. Storage:
+    - Use S3 storage.
+    - Maybe, if the WF instance is completed, the associated files can be moved to 'Glacial' storage after 'n' days. This will need to be configured on S3. [Or there can be a cron-job that does this]
+11. Static media
+    - Provide access via CDN. Possibly, AWS Cloudfront. Again, may not be needed initially specially if it is in a single geography.
+12. Customer accessibility.
+    - We can provide access to customers via a <orgname>.<our_domain> URL.
+    - Later, we could potentially use their domain name itself.
+
+Security Considerations
+==================================
+- Ensure that the system is deployed in a private subnet with access only from a VPN.
+- Consider setting up 'Encryption at rest' for the database.
+- Setup a exhaustive 'permissions' framework as a middleware --> invoked for all URL/API access.
+- URL re-writing/leaking across organizations should not be possible. As far as possible, ensure that parameters are encoded in the body and available only as POST.
+- Media/file access should also go through some authentication. In case of AWS S3, generate URLs and tokens which expire after a given period of time.
+- Use JWT authentication for the API access. with appropriate expiry for the access token (1d) and the refresh tokens (1h).
+- Other basic stuff [HTTPS, Owasp recommendations for CSRF, XSS]
+- Deletion of 'workflow' will be a soft-delete to ensure that existing wf instances are preserved.
+
+Load Considerations
+==================================
+Parameters:
+    - Number of orgs: 100
+    - Number of users per org: 1000
+    - Peak hours = 10 [Assuming all load comes in the 10 hrs]
+- Naive Dimensioning exercise for the REST APIs
+    - Daily load per user
+        - Number of WFs accessed per day per user: 8
+        - Number of WFs acted per day per user: 2
+        - Number of files uploaded: 1
+        - Number of comments: 1
+    - Total system transactions per day (across all users)
+        - WF Access   = 100 * 1000 * 8 = 800,000
+        - WF Actions  = 100 * 1000 * 2 = 200,000
+        - WF Files    = 100 * 1000 * 1 = 100,000
+        - WF Comments = 100 * 1000 * 1 = 100,000
+        Total Transactions per day: 1.2 Million
+    - Total transaction per peak hour = 120,000
+    - Transactions per Second (TPS) = 120,000 / 3600 = 33.33 (or 34)
+- Naive Dimensioning exercise for the Notifications
+    - Number of actions per user per day = 2 + 1 + 1
+    - Total number of notifications to be sent = 100 * 1000 * 4 = 400,000
+    - Total notifications per peak hour = 40,000
+    - Notification processing (TPS) = 40,000 / 3600 = 11.11 (or 12)
+
+- Based on this, we can dimension the hardware/cluster requirements.
+
+
+
+---> OLD STUFF
+
+Common attributes for WF/Task
+    soft_timeout: int = 0
+    hard_timeout: int = 0
+    retry: varchar [JSON]
+    - {count: 0} # Dont retry
+    - {count: 2, interval: x, backoff_strategy: 'exponential' or 'fixed'}
+
+    # notifications
+    # If user_ids are NULL, send to only 'owner' [Assumption]
+    - on_completion: varchar { notification_template, user_ids or NULL }
+    - on_task_retry: varchar { notification_template, user_ids or NULL }
+    - on_timeout: varchar { notification_template, user_ids or NULL }
+    - on_failure: varchar { notification_template, user_ids or NULL }
+
+Common attributes for all tables
+    created_by: fk to user_id
+    created_at: timestamp
+    last_modified_by: fk to user_id
+    last_modified_at: timestamp
+
+Available Tasks
+    - Platform Tasks [Typically code] [Task Group = 'SYSTEM']
+        - Fork Task [Allow forking into Sub-DAGs based on condition]
+            - Condition (based on the prev task return JSON)
+            - Condition/next_task mapping.
+        - Join Task [Allow waiting for multiple Sub-DAGs to complete]
+            - Task IDs to wait for and optionally conditions
+        - NoOp Task [Dont know for now how it will be used...]
+            - Mostly not needed!
+        - Manual Approval Task
+            - medium [sms, whatsapp, email]
+            - message_template [maybe, include medium with the template]
+            - link to go approve from. when user clicks on the approve button, the task completes [based on the button]
+            - timeout: x secs/mins. [Retry induced at timeout]
+                - expire old link, resend notification?
+            - fallback_approver
+            - what if we need to pick up a user based on specific role?
+        - Delay Task
+            - artificially introduce delay between two tasks.
+    - Generic Enterprise tasks [Task Group = 'ENTERPRISE']
+        - LLM Task
+            - call generative assistant and send the response?
+        - SQL Query Task
+            - This is dangerous...
+        - OCR Task
+            - Maybe we need this for reading invoices?
+        - PDF Extraction Task
+            - Extract data (structured/unstructured)
+        - API Tasks. [Add an API as a task]
+    - No code tasks [These are editable]
+        - Should be available on the UI [Authentication?]
+        - Custom Chained Tasks [Sequential chaining of predefined tasks]
+            - Can be useful if we have generic atomic tasks that need to be combined [Say Multiple LLM Tasks can be chained]
+        - Configured Tasks
+            - Tasks with a pre-specified configuration
+    - Precreated business logic tasks.
+        - These could also be precreated by chaining existing generic tasks.
+        - AP Tasks
+        - HR Tasks
+        - and more...
+
+Common Attributes of WF, Task
+    - timeout_secs [over-ride at a task level]
+        - force the WF to end/alarm if it exceeds this period...
+        - can have soft_timeout for warning and hard_timeout for killing..]
+        - Need to figure out how to kill running tasks?
+    - retry [over-ride at a task level]
+        - {count: 0} # Dont retry
+        - {count: 2, interval: x, backoff_strategy: 'exponential' or 'fixed'}
+    - notification [over-ride at a task level]
+        - on_completion: None|only_on_failure
+        - on_task_retry:
+        - on_timeout: owner [and/or other stakeholders]
+        - on_failure: owner [and/or other stakeholders]
+    - version: In case we need multiple versions available concurrently.
+    - active: True/False --> to disable the workflow..
+        - PUBLISHED or UNPUBLISHED
+    - the CRUD essentials: ctime, lmtime, create_user, lm_user
+    NOTE: Task level attributes will over-ride the WF level attributes
+
+Capabilities used across tasks [Can these be tasks themselves]
+    - Notification
+        - medium [sms, whatsapp, email, app_fcm]
+        - message_template [which template to use]
+        - SMS, Whatsapp delivery status???
+    - Save Data to Context
+        - to share data across all Tasks?
+    - Save Artifacts
+        - in case we want to move artifacts to S3 etc...
+        - and make it available for following tasks in the WF
+        - Run specific files to be stored with run_id???
+        - Upload to 3rd party system...
+    - Publish Event
+        - to allow tasks to send info for later analysis [Grafana/Kibana/etc]
+
+
+Workflow run
+    - run id: [for each run of the workflow]
+    - triggered_by: [some entity]
+        - Need to ensure that the triggering entity is authorizated!
+    - workflow id: the workflow id -- Includes org_id
+    - workflow context: K, V data to be shared across tasks?
+        - in case the first task wants to share data with the 5th task...
+        - use redis for this?
+    - artifact_urls:
+        - list of artifacts available in this WF.
+        - we assign a specific directory in S3 for these files
+        - types: images, pdf files, etc...
+    - stage: [current completed task in the workflow]
+        --> Create a detail table for workflow task with the same run_id...
+    - status [queued, started|running, completed, failed, killed]
+    - start_time, completion_time [and some stats]
+
+Task Run
+    - Status: RUNNING, WAITING, SUCCESS, FAILURE_RETRY, FAILURE
+        - Waiting for approval
+        - If task has been skipped (branched out) then we infer that for display in the UI...[Or we add another status - SKIPPED]
+    - start_time, completion_time, retry_count [and other stats]
+
+WF Invocation
+    - Task Invocation Params
+        - Input: { run_id, workflow_id, wf_params, prev_task_return }
+        - Output: return JSON...
+
+
+
+Event Logging:
+    - Inbuilt WF events like wf_started, task_started... etc.
+    - WF/Task Events to be sent to some external system....
+    - Sort of viewable on Kibana/Grafana etc?
+
+Load Considerations:
+    - Number of concurrent WFlows running...
+Other things
+    - OpenAPI/Swagger?
+    - Async --> FastAPI for python
+    - DB Schema Design
+    - Validations/Permissions?
+        - who is allowed to edit tasks/wflow?
+    - We may need a rule engine?
+    - Billing, API Throttling for WF/Task usage to be added later...
+    - Multi-lingual/RTL support not for now...
